@@ -1,12 +1,15 @@
 package ui
 
 import (
+	"bubblenet/internal/client"
 	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type reconnectMsg struct{}
 
 // Update maneja los mensajes y actualiza el modelo
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -48,8 +51,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateChat
 		m.currentRoom = msg.roomName
 		return m, nil
-	}
 
+	case wsConnectedMsg:
+		m.connectionStatus = client.StatusConnected
+		m.errorMsg = ""
+		return m, listenForWSMessages(m.wsClient)
+
+	case wsErrorMsg:
+		m.connectionStatus = client.StatusError
+		m.errorMsg = fmt.Sprintf("Connection error: %v", msg.err)
+		return m, tea.Tick(time.Second*3, func(t time.Time) tea.Msg {
+			return reconnectMsg{}
+		})
+
+	case wsStatusMsg:
+		m.connectionStatus = msg.status
+		if msg.status == client.StatusConnected {
+			return m, listenForWSMessages(m.wsClient)
+		}
+		return m, nil
+
+	case wsMessageMsg:
+		newMsg := Message{
+			Username:  msg.message.Username,
+			Content:   msg.message.Content,
+			Timestamp: msg.message.Timestamp,
+			IsSystem:  msg.message.Type == "system",
+		}
+		m.messages = append(m.messages, newMsg)
+
+		return m, listenForWSMessages(m.wsClient)
+
+	case reconnectMsg:
+		if m.connectionStatus != client.StatusConnected {
+			return m, connectWebSocket(m.wsClient)
+		}
+		return m, nil
+	}
 	// Actualizar componentes según el estado actual
 	return m.updateComponents(msg)
 }
@@ -139,15 +177,24 @@ func (m Model) handleLobbyKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) handleChatKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		// Enviar mensaje
+		// Enviar mensaje real al servidor
 		if m.messageInput.Value() != "" {
-			newMsg := Message{
-				Username:  m.config.Username,
-				Content:   m.messageInput.Value(),
-				Timestamp: time.Now(),
-				IsSystem:  false,
+			content := m.messageInput.Value()
+
+			// Enviar al servidor via WebSocket
+			if m.connectionStatus == client.StatusConnected {
+				m.wsClient.SendMessage(content)
+			} else {
+				// Si no hay conexión, mostrar error
+				errorMsg := Message{
+					Username:  "System",
+					Content:   "⚠️ Not connected to server. Cannot send message.",
+					Timestamp: time.Now(),
+					IsSystem:  true,
+				}
+				m.messages = append(m.messages, errorMsg)
 			}
-			m.messages = append(m.messages, newMsg)
+
 			m.messageInput.SetValue("")
 		}
 		return m, nil

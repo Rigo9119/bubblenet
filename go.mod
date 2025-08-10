@@ -2,7 +2,11 @@ module bubblenet
 
 go 1.24.4
 
-require github.com/charmbracelet/bubbletea v1.3.6
+require (
+	github.com/charmbracelet/bubbletea v1.3.6
+	github.com/go-chi/chi/v5 v5.2.2
+	github.com/gorilla/websocket v1.5.3
+)
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bubblenet/internal/client"
 	"fmt"
 	"time"
 
@@ -73,13 +74,21 @@ type Message struct {
 }
 
 type Model struct {
+	// estado de la app
 	state  AppState
 	config Config
 
+	// websocket client
+	wsClient         *client.WSClient
+	connectionStatus client.ConnectionStatus
+
+	// datos del lobby
 	rooms        []Room
 	selectedRoom int
 	roomList     list.Model
 
+	// datos del chat
+	users        []User
 	messages     []Message
 	messageInput textinput.Model
 
@@ -139,17 +148,22 @@ func NewApp(config Config) *Model {
 	roomList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	roomList.Title = "Available Rooms"
 
+	// crea el cliente websocket
+	wsClient := client.NewWSClient(config.Host, config.Port, config.Username, true)
+
 	model := &Model{
-		state:        config.GetInitialState(),
-		config:       config,
-		rooms:        getMockRooms(),
-		selectedRoom: 0,
-		roomList:     roomList,
-		messages:     []Message{},
-		messageInput: ti,
-		currentRoom:  config.Room,
-		inviteCode:   "",
-		errorMsg:     "",
+		state:            config.GetInitialState(),
+		config:           config,
+		wsClient:         wsClient,
+		connectionStatus: client.StatusDisconnected,
+		rooms:            getMockRooms(),
+		selectedRoom:     0,
+		roomList:         roomList,
+		messages:         []Message{},
+		messageInput:     ti,
+		currentRoom:      config.Room,
+		inviteCode:       "",
+		errorMsg:         "",
 	}
 
 	model.setupInitialData()
@@ -191,13 +205,14 @@ func (r roomItem) Description() string {
 func (m Model) Init() tea.Cmd {
 	switch m.state {
 	case StateLoading:
-		return tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
-			return loadCompleteMsg{}
-		})
+		return tea.Batch(
+			connectWebSocket(m.wsClient),
+			tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
+				return loadCompleteMsg{}
+			}),
+		)
 	case StateJoining:
-		return tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
-			return joinCompleteMsg{roomName: m.config.Room}
-		})
+		return connectWebSocket(m.wsClient)
 	default:
 		return nil
 	}
@@ -208,3 +223,33 @@ type (
 	joinCompleteMsg struct{ roomName string }
 	createRoomMsg   struct{ roomName string }
 )
+
+// Comando para conectar WebSocket
+func connectWebSocket(wsClient *client.WSClient) tea.Cmd {
+	return tea.Cmd(func() tea.Msg {
+		if err := wsClient.Connect(); err != nil {
+			return wsErrorMsg{err: err}
+		}
+		return wsConnectedMsg{}
+	})
+}
+
+// Mensajes de websocket
+type wsConnectedMsg struct{}
+type wsErrorMsg struct{ err error }
+type wsMessageMsg struct{ message client.WSMessage }
+type wsStatusMsg struct{ status client.ConnectionStatus }
+
+// Comando para escuchar mensajes WebSocket
+func listenForWSMessages(wsClient *client.WSClient) tea.Cmd {
+	return tea.Cmd(func() tea.Msg {
+		select {
+		case msg := <-wsClient.GetIncomingChannel():
+			return wsMessageMsg{message: msg}
+		case err := <-wsClient.GetErrorChannel():
+			return wsErrorMsg{err: err}
+		case status := <-wsClient.GetStatusChannel():
+			return wsStatusMsg{status: status}
+		}
+	})
+}

@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"bubblenet/internal/client"
 	"fmt"
 	"strings"
 
@@ -103,13 +104,13 @@ func (m Model) invitingView() string {
    %s
 
    Private room '#%s' created successfully!
-   
+
    Share this invite code with your friends:
-   
+
    %s
-   
+
    Anyone with this code can join your private room.
-   
+
    %s`,
 		title,
 		m.config.Room,
@@ -126,12 +127,28 @@ func (m Model) invitingView() string {
 
 // chatView muestra la interfaz de chat
 func (m Model) chatView() string {
-	// Header
-	title := titleStyle.Render(fmt.Sprintf("ROOM: #%s", m.currentRoom))
-	status := statusStyle.Render(fmt.Sprintf("User: %s", m.config.Username))
+	// Header con estado de conexión
+	titleText := fmt.Sprintf("ROOM: #%s", m.currentRoom)
+	statusText := fmt.Sprintf("User: %s | %s", m.config.Username, m.connectionStatus.String())
+
+	// Colorear status según estado
+	var statusStyle lipgloss.Style
+	switch m.connectionStatus {
+	case client.StatusConnected:
+		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
+	case client.StatusConnecting:
+		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))
+	case client.StatusError:
+		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	default:
+		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	}
+
+	title := titleStyle.Render(titleText)
+	status := statusStyle.Render(statusText)
 	header := lipgloss.JoinHorizontal(lipgloss.Top, title, " ", status)
 
-	// Mensajes
+	// Mensajes (mismo código que antes)
 	var messageLines []string
 	for _, msg := range m.messages {
 		var msgStyle lipgloss.Style
@@ -154,22 +171,35 @@ func (m Model) chatView() string {
 	}
 
 	// Área de mensajes (limitamos a las últimas líneas que caben)
-	maxLines := m.height - 6 // Reservar espacio para header, input y help
+	maxLines := m.height - 8 // Más espacio para header expandido
 	if len(messageLines) > maxLines {
 		messageLines = messageLines[len(messageLines)-maxLines:]
 	}
 
 	messagesArea := strings.Join(messageLines, "\n")
 
-	// Input de mensaje
-	inputArea := fmt.Sprintf("> %s", m.messageInput.View())
+	// Input de mensaje con indicador de conexión
+	var inputPrefix string
+	if m.connectionStatus == client.StatusConnected {
+		inputPrefix = "> "
+	} else {
+		inputPrefix = "[DISCONNECTED] > "
+	}
+	inputArea := fmt.Sprintf("%s%s", inputPrefix, m.messageInput.View())
 
 	// Ayuda
 	help := helpStyle.Render("[Enter] Send • [Q] Back to lobby • [Esc] Exit")
 
-	return fmt.Sprintf("%s\n\n%s\n\n%s\n%s",
+	// Mostrar error si hay
+	errorArea := ""
+	if m.errorMsg != "" {
+		errorArea = "\n" + errorStyle.Render("⚠️ "+m.errorMsg)
+	}
+
+	return fmt.Sprintf("%s\n\n%s%s\n\n%s\n%s",
 		header,
 		messagesArea,
+		errorArea,
 		inputArea,
 		help)
 }
