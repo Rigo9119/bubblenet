@@ -64,28 +64,83 @@ func (m Model) View() string {
 
 // loadingView muestra la pantalla de carga
 func (m Model) loadingView() string {
-	return fmt.Sprintf("\n\n   %s\n\n   Connecting to server...\n\n",
-		titleStyle.Render("BUBBLENET"))
+	var statusText string
+	var statusColor lipgloss.Color
+	
+	switch m.connectionStatus {
+	case client.StatusConnecting:
+		statusText = "Connecting to server..."
+		statusColor = "#FFFF00"
+	case client.StatusConnected:
+		statusText = "Connected! Loading..."
+		statusColor = "#00FF00"
+	case client.StatusError:
+		statusText = fmt.Sprintf("Connection failed: %s", m.errorMsg)
+		statusColor = "#FF0000"
+	default:
+		statusText = "Initializing..."
+		statusColor = "#888888"
+	}
+	
+	statusStyle := lipgloss.NewStyle().Foreground(statusColor)
+	
+	return fmt.Sprintf("\n\n   %s\n\n   %s\n\n",
+		titleStyle.Render("BUBBLENET"),
+		statusStyle.Render(statusText))
 }
 
 // lobbyView muestra el lobby principal
 func (m Model) lobbyView() string {
 	title := titleStyle.Render("BUBBLENET LOBBY")
 
-	// Lista de salas
-	roomsList := m.roomList.View()
+	// Status con información de conexión
+	connectionText := m.connectionStatus.String()
+	var connectionColor lipgloss.Color
+	switch m.connectionStatus {
+	case client.StatusConnected:
+		connectionColor = "#00FF00"
+	case client.StatusConnecting:
+		connectionColor = "#FFFF00"
+	case client.StatusError:
+		connectionColor = "#FF0000"
+	default:
+		connectionColor = "#888888"
+	}
+	
+	connectionStyle := lipgloss.NewStyle().Foreground(connectionColor)
+	status := statusStyle.Render(fmt.Sprintf("User: %s | Status: %s", 
+		m.config.Username, 
+		connectionStyle.Render(connectionText)))
 
-	// Información de ayuda
-	help := helpStyle.Render(
-		"[↑↓] Navigate • [Enter] Join • [C] Create • [R] Refresh • [Q] Quit")
-
-	// Status
-	status := statusStyle.Render(fmt.Sprintf("User: %s", m.config.Username))
+	// Solo mostrar lista de salas si está conectado
+	var content string
+	var help string
+	
+	if m.connectionStatus == client.StatusConnected {
+		// Lista de salas disponible
+		roomsList := m.roomList.View()
+		help = helpStyle.Render(
+			"[↑↓] Navigate • [Enter] Join • [C] Create • [R] Refresh • [Q] Quit")
+		content = roomsList
+	} else {
+		// Mensaje de espera
+		var message string
+		switch m.connectionStatus {
+		case client.StatusConnecting:
+			message = "Connecting to server, please wait..."
+		case client.StatusError:
+			message = errorStyle.Render("Connection failed. Retrying...")
+		default:
+			message = "Initializing connection..."
+		}
+		help = helpStyle.Render("[R] Refresh • [Q] Quit")
+		content = message
+	}
 
 	return fmt.Sprintf("%s\n%s\n\n%s\n\n%s",
 		title,
 		status,
-		roomsList,
+		content,
 		help)
 }
 
@@ -127,22 +182,9 @@ func (m Model) invitingView() string {
 
 // chatView muestra la interfaz de chat
 func (m Model) chatView() string {
-	// Header con estado de conexión
+	// Header simplificado
 	titleText := fmt.Sprintf("ROOM: #%s", m.currentRoom)
-	statusText := fmt.Sprintf("User: %s | %s", m.config.Username, m.connectionStatus.String())
-
-	// Colorear status según estado
-	var statusStyle lipgloss.Style
-	switch m.connectionStatus {
-	case client.StatusConnected:
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
-	case client.StatusConnecting:
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFF00"))
-	case client.StatusError:
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
-	default:
-		statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	}
+	statusText := fmt.Sprintf("User: %s", m.config.Username)
 
 	title := titleStyle.Render(titleText)
 	status := statusStyle.Render(statusText)
@@ -189,14 +231,8 @@ func (m Model) chatView() string {
 
 	messagesArea := strings.Join(messageLines, "\n")
 
-	// Input de mensaje con indicador de conexión
-	var inputPrefix string
-	if m.connectionStatus == client.StatusConnected {
-		inputPrefix = "-> "
-	} else {
-		inputPrefix = "[DISCONNECTED] > "
-	}
-	inputArea := fmt.Sprintf("%s%s", inputPrefix, m.messageInput.View())
+	// Input de mensaje simplificado
+	inputArea := fmt.Sprintf("> %s", m.messageInput.View())
 
 	// Ayuda
 	help := helpStyle.Render("[Enter] Send • [Q] Back to lobby • [Esc] Exit")

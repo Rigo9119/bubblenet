@@ -55,23 +55,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wsConnectedMsg:
 		m.connectionStatus = client.StatusConnected
 		m.errorMsg = ""
-		// Si estamos en loading, cambiar directamente a lobby después de conectar
-		if m.state == StateLoading {
-			m.state = StateLobby
-		}
+		// Determinar el estado correcto según la configuración inicial
+		m.state = m.config.GetInitialState()
 		return m, listenForWSMessages(m.wsClient)
 
 	case wsErrorMsg:
 		m.connectionStatus = client.StatusError
 		m.errorMsg = fmt.Sprintf("Connection error: %v", msg.err)
+		m.state = StateError
 		return m, tea.Tick(time.Second*3, func(t time.Time) tea.Msg {
 			return reconnectMsg{}
 		})
 
 	case wsStatusMsg:
-		m.connectionStatus = msg.status
+		fmt.Printf("DEBUG: Received wsStatusMsg with status: %v (current status: %v)\n", msg.status, m.connectionStatus)
+		// Only update if it's not going backwards from Connected to Connecting
+		if !(m.connectionStatus == client.StatusConnected && msg.status == client.StatusConnecting) {
+			m.connectionStatus = msg.status
+			fmt.Printf("DEBUG: Updated connectionStatus to: %v\n", m.connectionStatus)
+		} else {
+			fmt.Printf("DEBUG: Ignored status downgrade from Connected to Connecting\n")
+		}
 		if msg.status == client.StatusConnected {
+			// Determinar el estado correcto según la configuración inicial
+			m.state = m.config.GetInitialState()
+			// Configurar datos iniciales para el nuevo estado
+			if m.state == StateLobby {
+				// Configurar lista de salas
+				items := make([]list.Item, len(m.rooms))
+				for i, room := range m.rooms {
+					items[i] = roomItem{room}
+				}
+				m.roomList.SetItems(items)
+			}
 			return m, listenForWSMessages(m.wsClient)
+		} else if msg.status == client.StatusError {
+			m.state = StateError
 		}
 		return m, nil
 
@@ -158,34 +177,38 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) handleLobbyKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		// Unirse a la sala seleccionada
-		if len(m.rooms) > 0 {
+		// Unirse a la sala seleccionada (solo si está conectado)
+		if m.connectionStatus == client.StatusConnected && len(m.rooms) > 0 {
 			selected := m.roomList.SelectedItem()
 			if roomItem, ok := selected.(roomItem); ok {
 				m.currentRoom = roomItem.room.Name
 				m.messages = getMockMessages(roomItem.room.Name)
 				m.state = StateChat
-				// Asegurar que WebSocket esté conectado
-				if m.connectionStatus != client.StatusConnected {
-					return m, connectWebSocket(m.wsClient)
-				}
 				return m, nil
 			}
 		}
 
 	case "c":
-		// Crear nueva sala
-		m.state = StateCreating
-		return m, nil
+		// Crear nueva sala (solo si está conectado)
+		if m.connectionStatus == client.StatusConnected {
+			m.state = StateCreating
+			return m, nil
+		}
 
 	case "r":
-		// Refrescar lista de salas
-		m.rooms = getMockRooms()
-		items := make([]list.Item, len(m.rooms))
-		for i, room := range m.rooms {
-			items[i] = roomItem{room}
+		// Refrescar - reconectar si no está conectado, refrescar salas si está conectado
+		if m.connectionStatus == client.StatusConnected {
+			m.rooms = getMockRooms()
+			items := make([]list.Item, len(m.rooms))
+			for i, room := range m.rooms {
+				items[i] = roomItem{room}
+			}
+			m.roomList.SetItems(items)
+		} else {
+			// Intentar reconectar
+			m.connectionStatus = client.StatusConnecting
+			return m, connectWebSocket(m.wsClient)
 		}
-		m.roomList.SetItems(items)
 		return m, nil
 	}
 

@@ -93,7 +93,9 @@ func (ws *WSClient) Connect() error {
 
 	ws.conn = conn
 	ws.log("✅ Connected successfully")
+	ws.log("🔄 Sending StatusConnected to status channel")
 	ws.status <- StatusConnected
+	ws.log("✅ StatusConnected sent to status channel")
 
 	// Iniciar goroutines de lectura y escritura
 	go ws.readLoop()

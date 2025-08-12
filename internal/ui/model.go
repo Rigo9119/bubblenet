@@ -152,10 +152,10 @@ func NewApp(config Config) *Model {
 	wsClient := client.NewWSClient(config.Host, config.Port, config.Username, true)
 
 	model := &Model{
-		state:            config.GetInitialState(),
+		state:            StateLoading, // Siempre empezar cargando
 		config:           config,
 		wsClient:         wsClient,
-		connectionStatus: client.StatusDisconnected,
+		connectionStatus: client.StatusConnecting, // Empezar conectando
 		rooms:            getMockRooms(),
 		selectedRoom:     0,
 		roomList:         roomList,
@@ -203,26 +203,8 @@ func (r roomItem) Description() string {
 }
 
 func (m Model) Init() tea.Cmd {
-	switch m.state {
-	case StateLoading:
-		return tea.Batch(
-			connectWebSocket(m.wsClient),
-			tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
-				return loadCompleteMsg{}
-			}),
-		)
-	case StateJoining:
-		return tea.Batch(
-			connectWebSocket(m.wsClient),
-			tea.Tick(time.Second*1, func(t time.Time) tea.Msg {
-				return joinCompleteMsg{roomName: m.config.Room}
-			}),
-		)
-	case StateInviting:
-		return connectWebSocket(m.wsClient)
-	default:
-		return nil
-	}
+	// Siempre empezar conectando, sin importar el estado inicial
+	return connectWebSocket(m.wsClient)
 }
 
 type (
@@ -234,19 +216,14 @@ type (
 // Comando para conectar WebSocket
 func connectWebSocket(wsClient *client.WSClient) tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
+		fmt.Printf("DEBUG: Attempting WebSocket connection...\n")
 		if err := wsClient.Connect(); err != nil {
+			fmt.Printf("DEBUG: Connection failed with error: %v\n", err)
 			return wsErrorMsg{err: err}
 		}
-		// Esperar un momento para que el status se actualice
-		select {
-		case status := <-wsClient.GetStatusChannel():
-			return wsStatusMsg{status: status}
-		case err := <-wsClient.GetErrorChannel():
-			return wsErrorMsg{err: err}
-		case <-time.After(time.Millisecond * 100):
-			// Si no recibimos status inmediatamente, asumir conectado
-			return wsStatusMsg{status: client.StatusConnected}
-		}
+		fmt.Printf("DEBUG: WebSocket Connect() returned successfully\n")
+		// Si Connect() no devolvió error, la conexión fue exitosa
+		return wsStatusMsg{status: client.StatusConnected}
 	})
 }
 

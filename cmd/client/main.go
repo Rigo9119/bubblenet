@@ -19,7 +19,14 @@ type Config struct {
 	Username string
 }
 
-func validateAndCreateConfig(room string, private, invite bool, host string, port int, username string) (ui.Config, error) {
+func validateAndCreateConfig(
+	room string,
+	private,
+	invite bool,
+	host string,
+	port int,
+	username string,
+) (ui.Config, error) {
 	config := ui.Config{
 		Room:     room,
 		Private:  private,
