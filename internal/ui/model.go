@@ -212,6 +212,13 @@ func (m Model) Init() tea.Cmd {
 			}),
 		)
 	case StateJoining:
+		return tea.Batch(
+			connectWebSocket(m.wsClient),
+			tea.Tick(time.Second*1, func(t time.Time) tea.Msg {
+				return joinCompleteMsg{roomName: m.config.Room}
+			}),
+		)
+	case StateInviting:
 		return connectWebSocket(m.wsClient)
 	default:
 		return nil
@@ -230,7 +237,16 @@ func connectWebSocket(wsClient *client.WSClient) tea.Cmd {
 		if err := wsClient.Connect(); err != nil {
 			return wsErrorMsg{err: err}
 		}
-		return wsConnectedMsg{}
+		// Esperar un momento para que el status se actualice
+		select {
+		case status := <-wsClient.GetStatusChannel():
+			return wsStatusMsg{status: status}
+		case err := <-wsClient.GetErrorChannel():
+			return wsErrorMsg{err: err}
+		case <-time.After(time.Millisecond * 100):
+			// Si no recibimos status inmediatamente, asumir conectado
+			return wsStatusMsg{status: client.StatusConnected}
+		}
 	})
 }
 
@@ -253,3 +269,4 @@ func listenForWSMessages(wsClient *client.WSClient) tea.Cmd {
 		}
 	})
 }
+

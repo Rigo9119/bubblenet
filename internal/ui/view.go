@@ -146,7 +146,18 @@ func (m Model) chatView() string {
 
 	title := titleStyle.Render(titleText)
 	status := statusStyle.Render(statusText)
-	header := lipgloss.JoinHorizontal(lipgloss.Top, title, " ", status)
+
+	// Lista de usuarios online
+	userList := ""
+	if len(m.users) > 0 {
+		var userNames []string
+		for _, user := range m.users {
+			userNames = append(userNames, "🟢 "+user.UserName)
+		}
+		userList = " | Online: " + strings.Join(userNames, ", ")
+	}
+
+	header := lipgloss.JoinHorizontal(lipgloss.Top, title, " ", status, userList)
 
 	// Mensajes (mismo código que antes)
 	var messageLines []string
@@ -181,7 +192,7 @@ func (m Model) chatView() string {
 	// Input de mensaje con indicador de conexión
 	var inputPrefix string
 	if m.connectionStatus == client.StatusConnected {
-		inputPrefix = "> "
+		inputPrefix = "-> "
 	} else {
 		inputPrefix = "[DISCONNECTED] > "
 	}

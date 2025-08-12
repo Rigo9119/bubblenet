@@ -56,6 +56,7 @@ type WSMessage struct {
 	Content   string    `json:"content"`
 	Timestamp time.Time `json:"timestamp"`
 	Room      string    `json:"room,omitempty"`
+	Users     []string  `json:"users,omitempty"` // Para mensajes de tipo user_list
 }
 
 // NewWSClient crea un nuevo cliente WebSocket
@@ -91,8 +92,8 @@ func (ws *WSClient) Connect() error {
 	}
 
 	ws.conn = conn
-	ws.status <- StatusConnected
 	ws.log("✅ Connected successfully")
+	ws.status <- StatusConnected
 
 	// Iniciar goroutines de lectura y escritura
 	go ws.readLoop()

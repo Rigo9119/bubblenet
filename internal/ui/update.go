@@ -27,7 +27,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Mensajes personalizados
 	case loadCompleteMsg:
-		if m.state == StateLoading {
+		if m.state == StateLoading && m.connectionStatus == client.StatusConnected {
 			m.state = StateLobby
 		}
 		return m, nil
@@ -55,6 +55,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wsConnectedMsg:
 		m.connectionStatus = client.StatusConnected
 		m.errorMsg = ""
+		// Si estamos en loading, cambiar directamente a lobby después de conectar
+		if m.state == StateLoading {
+			m.state = StateLobby
+		}
 		return m, listenForWSMessages(m.wsClient)
 
 	case wsErrorMsg:
@@ -72,13 +76,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case wsMessageMsg:
-		newMsg := Message{
-			Username:  msg.message.Username,
-			Content:   msg.message.Content,
-			Timestamp: msg.message.Timestamp,
-			IsSystem:  msg.message.Type == "system",
+		// Manejar diferentes tipos de mensajes
+		switch msg.message.Type {
+		case "user_list":
+			// Actualizar lista de usuarios
+			m.users = []User{}
+			for _, username := range msg.message.Users {
+				m.users = append(m.users, User{
+					UserName:  username,
+					UserState: "online",
+				})
+			}
+		default:
+			// Mensaje de chat normal o sistema
+			newMsg := Message{
+				Username:  msg.message.Username,
+				Content:   msg.message.Content,
+				Timestamp: msg.message.Timestamp,
+				IsSystem:  msg.message.Type == "system",
+			}
+			m.messages = append(m.messages, newMsg)
 		}
-		m.messages = append(m.messages, newMsg)
 
 		return m, listenForWSMessages(m.wsClient)
 
@@ -147,6 +165,10 @@ func (m Model) handleLobbyKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.currentRoom = roomItem.room.Name
 				m.messages = getMockMessages(roomItem.room.Name)
 				m.state = StateChat
+				// Asegurar que WebSocket esté conectado
+				if m.connectionStatus != client.StatusConnected {
+					return m, connectWebSocket(m.wsClient)
+				}
 				return m, nil
 			}
 		}

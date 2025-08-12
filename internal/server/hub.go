@@ -1,8 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -58,6 +60,22 @@ func (h *Hub) Run() {
 				delete(h.clients, client)
 				close(client.send)
 				h.log("❌ Client disconnected. Total clients: %d", len(h.clients))
+				
+				// Enviar mensaje de sistema si el cliente tenía un username
+				if client.username != "" {
+					systemMsg := map[string]interface{}{
+						"type":      "system",
+						"username":  "System",
+						"content":   client.username + " left the chat",
+						"timestamp": time.Now(),
+					}
+					if msgBytes, err := json.Marshal(systemMsg); err == nil {
+						h.broadcast <- msgBytes
+					}
+					
+					// Enviar lista actualizada de usuarios
+					h.BroadcastUserList()
+				}
 			}
 
 		case message := <-h.broadcast:
@@ -144,6 +162,32 @@ func (h *Hub) HandleRoom(w http.ResponseWriter, r *http.Request) {
 	// Por ahora, usar el mismo handler que chat general
 	// Más tarde implementaremos lógica de salas separadas
 	h.HandleChat(w, r)
+}
+
+// GetOnlineUsers retorna la lista de usuarios conectados
+func (h *Hub) GetOnlineUsers() []string {
+	var users []string
+	for client := range h.clients {
+		if client.username != "" {
+			users = append(users, client.username)
+		}
+	}
+	return users
+}
+
+// BroadcastUserList envía la lista de usuarios a todos los clientes
+func (h *Hub) BroadcastUserList() {
+	users := h.GetOnlineUsers()
+	userListMsg := map[string]interface{}{
+		"type":      "user_list",
+		"username":  "System",
+		"content":   "",
+		"timestamp": time.Now(),
+		"users":     users,
+	}
+	if msgBytes, err := json.Marshal(userListMsg); err == nil {
+		h.broadcast <- msgBytes
+	}
 }
 
 // log helper para mensajes de debug

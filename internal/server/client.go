@@ -3,6 +3,7 @@ package server
 // esto manejara los clientes individuales
 
 import (
+	"encoding/json"
 	"log"
 	"time"
 
@@ -23,11 +24,23 @@ const (
 	maxMessageSize = 512
 )
 
+// WSMessage representa un mensaje WebSocket
+type WSMessage struct {
+	Type      string    `json:"type"`
+	Username  string    `json:"username"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+	Room      string    `json:"room,omitempty"`
+	Status    string    `json:"status,omitempty"` // online, offline, typing
+}
+
 // Client representa una conexión WebSocket individual
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
+	hub      *Hub
+	conn     *websocket.Conn
+	send     chan []byte
+	username string
+	status   string // online, offline, typing
 }
 
 // readPump lee mensajes del WebSocket
@@ -47,7 +60,7 @@ func (c *Client) readPump() {
 
 	// Loop de lectura
 	for {
-		_, message, err := c.conn.ReadMessage()
+		_, messageBytes, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("❌ WebSocket error: %v", err)
@@ -56,10 +69,47 @@ func (c *Client) readPump() {
 		}
 
 		// Log del mensaje recibido
-		c.hub.log("📨 Received from client: %s", string(message))
+		c.hub.log("📨 Received from client: %s", string(messageBytes))
 
-		// Broadcast a todos los demás clientes
-		c.hub.broadcast <- message
+		// Intentar parsear como JSON
+		var wsMsg WSMessage
+		if err := json.Unmarshal(messageBytes, &wsMsg); err != nil {
+			// Si no es JSON válido, crear mensaje simple
+			wsMsg = WSMessage{
+				Type:      "chat",
+				Username:  "Unknown",
+				Content:   string(messageBytes),
+				Timestamp: time.Now(),
+			}
+		}
+
+		// Actualizar información del cliente
+		if wsMsg.Username != "" && c.username == "" {
+			c.username = wsMsg.Username
+			c.status = "online"
+			
+			// Enviar mensaje de sistema notificando que el usuario se conectó
+			systemMsg := WSMessage{
+				Type:      "system",
+				Username:  "System",
+				Content:   c.username + " joined the chat",
+				Timestamp: time.Now(),
+			}
+			if systemBytes, err := json.Marshal(systemMsg); err == nil {
+				c.hub.broadcast <- systemBytes
+			}
+			
+			// Enviar lista actualizada de usuarios
+			c.hub.BroadcastUserList()
+		}
+
+		// Reenviar el mensaje procesado como JSON
+		if processedBytes, err := json.Marshal(wsMsg); err == nil {
+			c.hub.broadcast <- processedBytes
+		} else {
+			// Fallback: enviar mensaje original
+			c.hub.broadcast <- messageBytes
+		}
 	}
 }
 
